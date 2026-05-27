@@ -33,7 +33,7 @@ export class AnomalyIncidentEntity {
   @Column({ type: 'text' })
   description: string;
 
-  /** Related entity IDs for cross-linking */
+ 
   @Column({ name: 'order_id', type: 'varchar', nullable: true })
   orderId: string | null;
 

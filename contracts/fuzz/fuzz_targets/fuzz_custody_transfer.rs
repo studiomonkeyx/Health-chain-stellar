@@ -7,13 +7,13 @@ use soroban_sdk::{
     Address, Env, String as SorobanString, Symbol,
 };
 
-// Import the contract types
+
 use health_chain_contract::{
     BloodComponent, BloodStatus, BloodType, CustodyStatus, Error, HealthChainContract,
     HealthChainContractClient,
 };
 
-/// Represents a custody transfer operation
+
 #[derive(Arbitrary, Debug, Clone)]
 enum CustodyOperation {
     InitiateTransfer { unit_id: u8 },
