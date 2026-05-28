@@ -9,7 +9,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
 import { OptimisticLockVersionMismatchError, Repository, DataSource } from 'typeorm';
 
-import { PaginatedResponse, PaginationUtil } from '../common/pagination';
+import { PaginatedResponse, PaginationQueryDto, PaginationUtil } from '../common/pagination';
 import {
   OrderConfirmedEvent,
   OrderCancelledEvent,
@@ -62,12 +62,22 @@ export class OrdersService {
     private readonly approvalService: ApprovalService,
   ) { }
 
-  async findAll(status?: string, hospitalId?: string) {
+  async findAll(
+    status?: string,
+    hospitalId?: string,
+    pagination: PaginationQueryDto = {},
+  ): Promise<PaginatedResponse<OrderEntity>> {
+    const { page = 1, pageSize = 25 } = pagination;
     const where: Partial<OrderEntity> = {};
     if (status) where.status = status as OrderStatus;
     if (hospitalId) where.hospitalId = hospitalId;
-    const orders = await this.orderRepo.find({ where });
-    return { message: 'Orders retrieved successfully', data: orders };
+    const [orders, totalCount] = await this.orderRepo.findAndCount({
+      where,
+      order: { placedAt: 'DESC' },
+      take: pageSize,
+      skip: PaginationUtil.calculateSkip(page, pageSize),
+    });
+    return PaginationUtil.createResponse(orders, page, pageSize, totalCount);
   }
 
   async findAllWithFilters(params: OrderQueryParamsDto): Promise<PaginatedResponse<Order>> {
