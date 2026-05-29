@@ -9,9 +9,18 @@ import {
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 
-import { PaginatedResponse, PaginationUtil } from '../common/pagination';
-import { OutboxService } from '../events/outbox.service';
-import { OutboxEventType } from '../events/outbox-event.entity';
+import { PaginatedResponse, PaginationQueryDto, PaginationUtil } from '../common/pagination';
+import {
+  OrderConfirmedEvent,
+  OrderCancelledEvent,
+  OrderStatusUpdatedEvent,
+  OrderRiderAssignedEvent,
+  OrderDispatchedEvent,
+  OrderInTransitEvent,
+  OrderDeliveredEvent,
+  OrderDisputedEvent,
+  OrderResolvedEvent,
+} from '../events';
 import { InventoryService } from '../inventory/inventory.service';
 import { ApprovalService } from '../approvals/approval.service';
 import { ApprovalActionType } from '../approvals/enums/approval.enum';
@@ -63,12 +72,22 @@ export class OrdersService {
     private readonly securityEventLogger: SecurityEventLoggerService,
   ) {}
 
-  async findAll(status?: string, hospitalId?: string) {
+  async findAll(
+    status?: string,
+    hospitalId?: string,
+    pagination: PaginationQueryDto = {},
+  ): Promise<PaginatedResponse<OrderEntity>> {
+    const { page = 1, pageSize = 25 } = pagination;
     const where: Partial<OrderEntity> = {};
     if (status) where.status = status as OrderStatus;
     if (hospitalId) where.hospitalId = hospitalId;
-    const orders = await this.orderRepo.find({ where });
-    return { message: 'Orders retrieved successfully', data: orders };
+    const [orders, totalCount] = await this.orderRepo.findAndCount({
+      where,
+      order: { placedAt: 'DESC' },
+      take: pageSize,
+      skip: PaginationUtil.calculateSkip(page, pageSize),
+    });
+    return PaginationUtil.createResponse(orders, page, pageSize, totalCount);
   }
 
   async findAllWithFilters(
