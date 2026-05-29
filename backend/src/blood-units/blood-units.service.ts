@@ -39,6 +39,7 @@ import { OrganizationEntity } from '../organizations/entities/organization.entit
 interface AuthenticatedUserContext {
   id: string;
   role: string;
+  organizationId?: string;
 }
 
 @Injectable()

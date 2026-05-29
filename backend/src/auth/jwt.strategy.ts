@@ -11,6 +11,7 @@ export interface JwtPayload {
   email: string;
   role: string;
   sid?: string;
+  organizationId?: string;
   organizationId?: string | null;
   jti?: string;
   kid?: string;
@@ -23,6 +24,7 @@ export interface AuthenticatedUser {
   email: string;
   role: string;
   sid?: string;
+  organizationId?: string;
   organizationId?: string | null;
 }
 
@@ -55,6 +57,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       email: payload.email,
       role: payload.role,
       sid: payload.sid,
+      organizationId: payload.organizationId,
       organizationId: payload.organizationId ?? null,
     };
   }

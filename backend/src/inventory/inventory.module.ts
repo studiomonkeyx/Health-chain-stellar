@@ -26,6 +26,7 @@ import { InventoryAnalyticsService } from './inventory-analytics.service';
 import { InventoryEventListener } from './inventory-event.listener';
 import { InventoryForecastingService } from './inventory-forecasting.service';
 import { InventoryController } from './inventory.controller';
+import { InventoryRepository } from './repositories/inventory.repository';
 import { InventoryService } from './inventory.service';
 import { DonorOutreachProcessor } from './processors/donor-outreach.processor';
 import { InventoryAlertService } from './services/inventory-alert.service';
@@ -61,6 +62,7 @@ import { RestockingCampaignService } from './services/restocking-campaign.servic
   providers: [
     InventoryStockRepository,
     InventoryService,
+    InventoryRepository,
     InventoryForecastingService,
     InventoryAnalyticsService,
     InventoryEventListener,

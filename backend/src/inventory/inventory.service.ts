@@ -22,6 +22,7 @@ import {
   ReservationAuditEntity,
 } from './entities/reservation-audit.entity';
 import { InventoryStockEntity } from './entities/inventory-stock.entity';
+import { InventoryRepository } from './repositories/inventory.repository';
 import { InventoryStockRepository } from './repositories/inventory-stock.repository';
 
 export interface ReserveOptions {
@@ -35,6 +36,10 @@ export class InventoryService {
   private readonly logger = new Logger(InventoryService.name);
 
   constructor(
+    @InjectRepository(InventoryStockEntity)
+    private readonly inventoryRepo: Repository<InventoryStockEntity>,
+    private readonly unitInvariant: ReservedUnitInvariantService,
+    private readonly customInventoryRepo: InventoryRepository,
     private readonly stockRepo: InventoryStockRepository,
     @InjectRepository(ReservationAuditEntity)
     private readonly auditRepo: Repository<ReservationAuditEntity>,
@@ -117,6 +122,21 @@ export class InventoryService {
     return { message: 'Stock updated successfully', data };
   }
 
+  async getStockAggregation() {
+    const data = await this.customInventoryRepo.getStockAggregationByBloodType();
+    return { data };
+  }
+
+  async getLowStockItems(threshold: number = 10) {
+    const data = await this.inventoryRepo
+      .createQueryBuilder('inventory')
+      .where('inventory.availableUnits <= :threshold', { threshold })
+      .getMany();
+
+    return {
+      message: 'Low stock items retrieved successfully',
+      data,
+    };
   async getLowStockItems(threshold = 10) {
     const data = await this.stockRepo.getLowStock(threshold);
     return { message: 'Low stock items retrieved successfully', data };
