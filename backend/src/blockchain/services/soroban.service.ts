@@ -501,4 +501,16 @@ export class SorobanService {
 
     return result;
   }
+
+  private async handleAllocationEvent(payload: any): Promise<void> {
+    this.logger.debug('Processing allocation event from blockchain', { payload });
+  }
+
+  private async handleDeliveryEvent(payload: any): Promise<void> {
+    this.logger.debug('Processing delivery event from blockchain', { payload });
+  }
+
+  private async handlePaymentReleasedEvent(payload: any): Promise<void> {
+    this.logger.debug('Processing payment released event from blockchain', { payload });
+  }
 }
