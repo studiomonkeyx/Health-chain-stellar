@@ -65,6 +65,18 @@ impl RequestContract {
         }
     }
 
+    fn is_valid_transition(from: &RequestStatus, to: &RequestStatus) -> bool {
+        matches!(
+            (from, to),
+            (RequestStatus::Pending, RequestStatus::Approved)
+                | (RequestStatus::Pending, RequestStatus::Rejected)
+                | (RequestStatus::Approved, RequestStatus::Rejected)
+                | (RequestStatus::Approved, RequestStatus::InProgress)
+                | (RequestStatus::Approved, RequestStatus::Fulfilled)
+                | (RequestStatus::InProgress, RequestStatus::Fulfilled)
+        )
+    }
+
     fn release_reservation_if_present(env: &Env, request: &mut BloodRequest) -> bool {
         if let Some(res_id) = request.reservation_id {
             let inventory_addr = storage::get_inventory_contract(env);
@@ -112,6 +124,34 @@ impl RequestContract {
         storage::require_initialized(&env)?;
         storage::get_admin(&env).require_auth();
         storage::revoke_hospital(&env, &hospital);
+        Ok(())
+    }
+
+    pub fn authorize_blood_bank(env: Env, blood_bank: Address) -> Result<(), ContractError> {
+        storage::require_initialized(&env)?;
+        storage::get_admin(&env).require_auth();
+        storage::authorize_blood_bank(&env, &blood_bank);
+        Ok(())
+    }
+
+    pub fn revoke_blood_bank(env: Env, blood_bank: Address) -> Result<(), ContractError> {
+        storage::require_initialized(&env)?;
+        storage::get_admin(&env).require_auth();
+        storage::revoke_blood_bank(&env, &blood_bank);
+        Ok(())
+    }
+
+    pub fn authorize_rider(env: Env, rider: Address) -> Result<(), ContractError> {
+        storage::require_initialized(&env)?;
+        storage::get_admin(&env).require_auth();
+        storage::authorize_rider(&env, &rider);
+        Ok(())
+    }
+
+    pub fn revoke_rider(env: Env, rider: Address) -> Result<(), ContractError> {
+        storage::require_initialized(&env)?;
+        storage::get_admin(&env).require_auth();
+        storage::revoke_rider(&env, &rider);
         Ok(())
     }
 
@@ -172,6 +212,7 @@ impl RequestContract {
     /// Create multiple blood requests in a single transaction.
     /// Each tuple is `(blood_type, component, quantity_ml, urgency, required_by_timestamp)`.
     /// Returns the Vec of new request IDs in input order.
+    /// Validates all items first, then writes all atomically.
     pub fn batch_create_requests(
         env: Env,
         hospital: Address,
@@ -184,12 +225,17 @@ impl RequestContract {
             return Err(ContractError::NotAuthorizedHospital);
         }
 
+        for i in 0..entries.len() {
+            let (_, _, quantity_ml, _, required_by_timestamp) =
+                entries.get(i).unwrap();
+            validation::validate_timestamp(&env, required_by_timestamp)?;
+            validation::validate_quantity(quantity_ml)?;
+        }
+
         let mut ids: soroban_sdk::Vec<u64> = soroban_sdk::Vec::new(&env);
         for i in 0..entries.len() {
             let (blood_type, component, quantity_ml, urgency, required_by_timestamp) =
                 entries.get(i).unwrap();
-            validation::validate_timestamp(&env, required_by_timestamp)?;
-            validation::validate_quantity(quantity_ml)?;
 
             let request_id = storage::increment_request_counter(&env);
             let request = BloodRequest {
@@ -302,26 +348,21 @@ impl RequestContract {
         }
 
         let old_status = request.status;
+
+        if !Self::is_valid_transition(&old_status, &new_status) {
+            return Err(ContractError::InvalidRequestStatus);
+        }
+
         let mut released_reservation = false;
         let mut fulfilled_delta_ml = 0;
 
         match new_status {
-            RequestStatus::Approved => {
-                if old_status != RequestStatus::Pending {
-                    return Err(ContractError::InvalidRequestStatus);
-                }
-            }
+            RequestStatus::Approved => {}
             RequestStatus::Rejected => {
-                if old_status != RequestStatus::Pending && old_status != RequestStatus::Approved {
-                    return Err(ContractError::InvalidRequestStatus);
-                }
                 Self::ensure_non_empty_reason(&reason)?;
                 released_reservation = Self::release_reservation_if_present(&env, &mut request);
             }
             RequestStatus::Fulfilled => {
-                if old_status != RequestStatus::Approved && old_status != RequestStatus::InProgress {
-                    return Err(ContractError::InvalidRequestStatus);
-                }
                 let remaining = request.quantity_ml.saturating_sub(request.fulfilled_quantity_ml);
                 fulfilled_delta_ml = remaining;
                 request.fulfilled_quantity_ml = request.quantity_ml;
