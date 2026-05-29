@@ -1,6 +1,10 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectRepository } from '@nestjs/typeorm';
+
+import { Redis } from 'ioredis';
+
+import { REDIS_CLIENT } from '../redis/redis.constants';
 
 import { Repository } from 'typeorm';
 
@@ -138,8 +142,6 @@ function recommendedAction(severity: DeviationSeverity): string {
 export class RouteDeviationService {
   private readonly logger = new Logger(RouteDeviationService.name);
 
-  /** riderId → { firstOffAt: Date, lastDistanceM: number } */
-  private readonly offCorridorState = new Map<string, OffCorridorState>();
   private readonly telemetryBuffers = new Map<string, TelemetrySample[]>();
 
   constructor(
@@ -151,7 +153,32 @@ export class RouteDeviationService {
     private readonly featureExtractor: SeverityFeatureExtractorService,
     private readonly classifier: SeverityClassifierService,
     private readonly triageAutomation: TriageAutomationService,
+    @Inject(REDIS_CLIENT) private readonly redis: Redis,
   ) { }
+
+  private offCorridorKey(riderId: string): string {
+    return `route-deviation:off-corridor:${riderId}`;
+  }
+
+  private async getOffCorridorState(riderId: string): Promise<OffCorridorState | null> {
+    const raw = await this.redis.get(this.offCorridorKey(riderId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return { ...parsed, firstOffAt: new Date(parsed.firstOffAt) };
+  }
+
+  private async setOffCorridorState(riderId: string, state: OffCorridorState): Promise<void> {
+    await this.redis.set(
+      this.offCorridorKey(riderId),
+      JSON.stringify({ ...state, firstOffAt: state.firstOffAt.toISOString() }),
+      'EX',
+      600,
+    );
+  }
+
+  private async deleteOffCorridorState(riderId: string): Promise<void> {
+    await this.redis.del(this.offCorridorKey(riderId));
+  }
 
   // ── Planned route management ─────────────────────────────────────────
 
@@ -210,7 +237,7 @@ export class RouteDeviationService {
 
     if (smoothedDistanceM <= exitThresholdM) {
       // Back on corridor — clear off-corridor state once the smoothed path settles.
-      this.offCorridorState.delete(dto.riderId);
+      await this.deleteOffCorridorState(dto.riderId);
       return;
     }
 
@@ -220,10 +247,10 @@ export class RouteDeviationService {
     }
 
     const now = new Date();
-    const existing = this.offCorridorState.get(dto.riderId);
+    const existing = await this.getOffCorridorState(dto.riderId);
 
     if (!existing) {
-      this.offCorridorState.set(dto.riderId, {
+      await this.setOffCorridorState(dto.riderId, {
         firstOffAt: now,
         lastDistanceM: distanceM,
         smoothedDistanceM,
@@ -235,7 +262,7 @@ export class RouteDeviationService {
     const durationS = Math.floor(
       (now.getTime() - existing.firstOffAt.getTime()) / 1000,
     );
-    this.offCorridorState.set(dto.riderId, {
+    await this.setOffCorridorState(dto.riderId, {
       firstOffAt: existing.firstOffAt,
       lastDistanceM: distanceM,
       smoothedDistanceM,
@@ -378,7 +405,7 @@ export class RouteDeviationService {
 
     incident.status = DeviationStatus.RESOLVED;
     incident.resolvedAt = new Date();
-    this.offCorridorState.delete(incident.riderId);
+    await this.deleteOffCorridorState(incident.riderId);
     return this.incidentRepo.save(incident);
   }
 

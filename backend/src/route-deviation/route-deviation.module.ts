@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { IncidentReviewsModule } from '../incident-reviews/incident-reviews.module';
+import { RedisModule } from '../redis/redis.module';
 
 import { DeviationIncidentListener } from './deviation-incident.listener';
 import { PlannedRouteEntity } from './entities/planned-route.entity';
@@ -20,6 +21,7 @@ import { TriageAutomationService } from './triage-automation.service';
       RouteDeviationIncidentEntity,
     ]),
     IncidentReviewsModule,
+    RedisModule,
   ],
   controllers: [RouteDeviationController],
   providers: [
