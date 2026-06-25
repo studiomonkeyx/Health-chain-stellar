@@ -437,7 +437,7 @@ fn fee_calculation_is_correct() {
         fixed_fee: 0,
     };
 
-    assert_eq!(fees.total(), 20);
+    assert_eq!(fees.total(), Some(20));
     assert_eq!(fees.calculate_net_amount(1_000).unwrap(), 980);
 }
 
@@ -1063,4 +1063,50 @@ fn test_create_payment_fails_with_unauthorized_backend_auth() {
     if let Err(Ok(e)) = result {
         assert_eq!(e, crate::Error::Unauthorized);
     }
+}
+
+// ======================================================
+// FeeStructure::total() overflow tests (#941)
+// ======================================================
+
+#[test]
+fn fee_structure_total_returns_correct_sum() {
+    let env = Env::default();
+    let fee = FeeStructure {
+        policy_id: Symbol::new(&env, "p"),
+        service_fee: 100,
+        network_fee: 50,
+        performance_bonus: 25,
+        fixed_fee: 10,
+    };
+    assert_eq!(fee.total(), Some(185));
+}
+
+#[test]
+fn fee_structure_total_returns_none_on_i128_overflow() {
+    let env = Env::default();
+    let fee = FeeStructure {
+        policy_id: Symbol::new(&env, "p"),
+        service_fee: i128::MAX / 2,
+        network_fee: i128::MAX / 2,
+        performance_bonus: 3,
+        fixed_fee: 0,
+    };
+    assert_eq!(fee.total(), None);
+}
+
+#[test]
+fn fee_structure_calculate_net_errors_on_overflow() {
+    let env = Env::default();
+    let fee = FeeStructure {
+        policy_id: Symbol::new(&env, "p"),
+        service_fee: i128::MAX / 2,
+        network_fee: i128::MAX / 2,
+        performance_bonus: 3,
+        fixed_fee: 0,
+    };
+    assert_eq!(
+        fee.calculate_net_amount(1_000_000),
+        Err(PaymentError::Overflow)
+    );
 }
