@@ -346,9 +346,12 @@ impl PendingApproval {
 }
 
 impl FeeStructure {
-    /// Calculates total fees
-    pub fn total(&self) -> i128 {
-        self.service_fee + self.network_fee + self.performance_bonus + self.fixed_fee
+    /// Calculates total fees, returning None if any intermediate sum overflows i128.
+    pub fn total(&self) -> Option<i128> {
+        self.service_fee
+            .checked_add(self.network_fee)?
+            .checked_add(self.performance_bonus)?
+            .checked_add(self.fixed_fee)
     }
 
     /// Validates fee structure
@@ -365,7 +368,7 @@ impl FeeStructure {
 
     /// Calculates net amount after deducting fees
     pub fn calculate_net_amount(&self, gross_amount: i128) -> Result<i128, PaymentError> {
-        let total_fees = self.total();
+        let total_fees = self.total().ok_or(PaymentError::Overflow)?;
         if total_fees > gross_amount {
             return Err(PaymentError::FeesExceedAmount);
         }
@@ -386,4 +389,5 @@ pub enum PaymentError {
     EscrowNotReleasable,
     InvalidMultiSigConfig,
     DuplicateApproval,
+    Overflow,
 }

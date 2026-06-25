@@ -325,6 +325,19 @@ pub fn archive_custody_events(env: &Env, unit_id: u64) -> Result<bool, Error> {
         return Ok(false);
     }
 
+    // Use the per-unit index to find only this unit's event_ids — O(k) where k = events
+    // for this unit, avoiding an O(n) scan over all custody events across all units.
+    let unit_events_key = DataKey::UnitCustodyEvents(unit_id);
+    let event_ids: Vec<SorobanString> = env
+        .storage()
+        .persistent()
+        .get(&unit_events_key)
+        .unwrap_or(Vec::new(env));
+
+    if event_ids.is_empty() {
+        return Ok(false);
+    }
+
     let mut custody_events: Map<SorobanString, CustodyEvent> = env
         .storage()
         .persistent()
@@ -334,35 +347,29 @@ pub fn archive_custody_events(env: &Env, unit_id: u64) -> Result<bool, Error> {
     let mut confirmed: u32 = 0;
     let mut cancelled: u32 = 0;
     let mut last_event_at: u64 = 0;
-    let mut keys_to_remove: Vec<SorobanString> = Vec::new(env);
 
-    for (event_id, event) in custody_events.iter() {
-        if event.unit_id != unit_id {
-            continue;
+    for i in 0..event_ids.len() {
+        let event_id = event_ids.get(i).unwrap();
+        if let Some(event) = custody_events.get(event_id.clone()) {
+            match event.status {
+                CustodyStatus::Confirmed => confirmed += 1,
+                CustodyStatus::Cancelled => cancelled += 1,
+                CustodyStatus::Pending | CustodyStatus::Recovered => {}
+            }
+            if event.initiated_at > last_event_at {
+                last_event_at = event.initiated_at;
+            }
+            custody_events.remove(event_id);
         }
-        match event.status {
-            CustodyStatus::Confirmed => confirmed += 1,
-            CustodyStatus::Cancelled => cancelled += 1,
-            CustodyStatus::Pending | CustodyStatus::Recovered => {}
-        }
-        if event.initiated_at > last_event_at {
-            last_event_at = event.initiated_at;
-        }
-        keys_to_remove.push_back(event_id);
     }
 
-    if keys_to_remove.is_empty() {
-        return Ok(false);
-    }
-
-    for i in 0..keys_to_remove.len() {
-        let key = keys_to_remove.get(i).unwrap();
-        custody_events.remove(key);
-    }
     env.storage()
         .persistent()
         .set(&CUSTODY_EVENTS, &custody_events);
     bump_persistent(env, &CUSTODY_EVENTS);
+
+    // Clear the per-unit index now that its events have been archived
+    env.storage().persistent().remove(&unit_events_key);
 
     let summary = ArchivedCustodySummary {
         total_confirmed: confirmed,

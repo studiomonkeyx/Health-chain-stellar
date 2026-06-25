@@ -73,6 +73,8 @@ pub enum Error {
     DuplicateApproval = 31,
     EscrowNotReleasable = 32,
     InvalidFeePayload = 33,
+    /// delivery_address string exceeds MAX_DELIVERY_ADDRESS_LENGTH.
+    DeliveryAddressTooLong = 34,
 }
 
 // Alias for issue/docs terminology.
@@ -556,6 +558,8 @@ pub enum DataKey {
     HospitalUnits(Address),
     /// Per-unit pending custody event index: unit_id -> String (event_id of the active Pending custody event)
     UnitCustodyIndex(u64),
+    /// Per-unit custody events list: unit_id -> Vec<String> (all event_ids ever created for this unit)
+    UnitCustodyEvents(u64),
     /// Custody trail page: (unit_id, page_number) -> Vec<String> (max 20 event IDs)
     UnitTrailPage(u64, u32),
     /// Custody trail metadata: unit_id -> TrailMetadata
@@ -581,9 +585,10 @@ pub use storage_lifecycle::{
 
 // Re-export constants for internal use
 pub(crate) use constants::{
-    HEX_HASH_LENGTH, MAX_BATCH_EXPIRY_SIZE, MAX_BATCH_SIZE, MAX_EVENTS_PER_PAGE, MAX_QUANTITY_ML,
-    MAX_REQUEST_ML, MAX_SHELF_LIFE_DAYS, MAX_UNIT_ID_LENGTH, MIN_QUANTITY_ML, MIN_REQUEST_ML,
-    MIN_SHELF_LIFE_DAYS, NOMINATION_EXPIRY_SECONDS, SECONDS_PER_DAY, TRANSFER_EXPIRY_SECONDS,
+    HEX_HASH_LENGTH, MAX_BATCH_EXPIRY_SIZE, MAX_BATCH_SIZE, MAX_DELIVERY_ADDRESS_LENGTH,
+    MAX_EVENTS_PER_PAGE, MAX_QUANTITY_ML, MAX_REQUEST_ML, MAX_SHELF_LIFE_DAYS, MAX_UNIT_ID_LENGTH,
+    MIN_QUANTITY_ML, MIN_REQUEST_ML, MIN_SHELF_LIFE_DAYS, NOMINATION_EXPIRY_SECONDS,
+    SECONDS_PER_DAY, TRANSFER_EXPIRY_SECONDS,
 };
 
 /// Pending SuperAdmin nomination entry.
@@ -1392,6 +1397,19 @@ impl HealthChainContract {
         // Maintain UnitCustodyIndex so confirm_delivery can find the pending event in O(1)
         let index_key = DataKey::UnitCustodyIndex(unit_id);
         env.storage().persistent().set(&index_key, &event_id);
+
+        // Maintain per-unit custody events list so archive_custody_events can find all events
+        // for this unit in O(k) (k = events per unit) instead of scanning the full CUSTODY_EVENTS map
+        let unit_events_key = DataKey::UnitCustodyEvents(unit_id);
+        let mut unit_event_ids: Vec<String> = env
+            .storage()
+            .persistent()
+            .get(&unit_events_key)
+            .unwrap_or(Vec::new(&env));
+        unit_event_ids.push_back(event_id.clone());
+        env.storage()
+            .persistent()
+            .set(&unit_events_key, &unit_event_ids);
 
         let old_status = unit.status;
         unit.status = BloodStatus::InTransit;
@@ -2482,6 +2500,10 @@ impl HealthChainContract {
 
         if delivery_address.is_empty() {
             return Err(Error::InvalidDeliveryAddress);
+        }
+
+        if delivery_address.len() > MAX_DELIVERY_ADDRESS_LENGTH {
+            return Err(Error::DeliveryAddressTooLong);
         }
 
         let current_time = env.ledger().timestamp();
@@ -5201,6 +5223,31 @@ mod test {
             &UrgencyLevel::Urgent,
             &required_by,
             &String::from_str(&env, "Ward C"),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #34)")]
+    fn test_create_request_delivery_address_too_long() {
+        let env = Env::default();
+        let (_, _, hospital, client) = setup_contract_with_hospital(&env);
+
+        env.mock_all_auths();
+        let current_time = env.ledger().timestamp();
+        let required_by = current_time + 3600;
+
+        // 201 bytes — one byte over MAX_DELIVERY_ADDRESS_LENGTH (200)
+        let addr_bytes = [b'a'; 201];
+        let addr_str = core::str::from_utf8(&addr_bytes).unwrap();
+        let long_addr = String::from_str(&env, addr_str);
+
+        client.create_request(
+            &hospital,
+            &BloodType::OPositive,
+            &200,
+            &UrgencyLevel::High,
+            &required_by,
+            &long_addr,
         );
     }
 
